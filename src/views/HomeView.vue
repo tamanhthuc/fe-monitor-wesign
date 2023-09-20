@@ -11,15 +11,23 @@ import Chart from 'chart.js'
     data(){
       return {
         memoryChart: null,
-        maxEntries: 50,
-        interval: 300,
+        allocated: [],
+        workingSet: [],
+        generation0: [],
+        generation1: [],
+        generation2: [],
         previousGen0: 0,
         previousGen1: 0,
         previousGen2: 0,
+        maxEntries: 50,
+        interval: 300,
       }
     },
     mounted() {
-      this.renderChart();
+      this.initializeChart();
+      
+      setInterval(this.fetchData, this.interval);
+      // this.renderChart()
     },
     methods: {
       renderChart(){
@@ -137,8 +145,6 @@ import Chart from 'chart.js'
             }
         });
 
-        const maxEntries = 50;
-        const interval = 300;
         var allocated = memoryChart.data.datasets[0].data;
         var workingSet = memoryChart.data.datasets[1].data;
         var generation0 = memoryChart.data.datasets[2].data;
@@ -180,7 +186,7 @@ import Chart from 'chart.js'
                         previousGen0 = diagnostics.gen0;
                     }
 
-                    if (allocated.length > maxEntries) {
+                    if (allocated.length > this.maxEntries) {
                         let firstDate = allocated[0].x;
 
                         allocated.shift();
@@ -193,15 +199,15 @@ import Chart from 'chart.js'
 
                     memoryChart.update();
                 });
-        }, interval);
+        }, this.interval);
       },
       /**
        * khởi tạo giá trị ban đầu của chart
        * @author tmthuc
        */
       initializeChart() {
-        const memoryCanvas = this.$refs.memoryCanvas;
-        this.memoryChart = new Chart(memoryCanvas, {
+        const memoryContext = document.getElementById("memory-canvas").getContext('2d');
+        this.memoryChart = new Chart(memoryContext, {
           type: 'line',
           data: {
             // Các cài đặt dữ liệu và dataset ở đây
@@ -316,30 +322,63 @@ import Chart from 'chart.js'
           },
         });
       },
-      fetchDataAndUpdateChart() {
-        setInterval(() => {
-          fetch("https://localhost:44340/api/diagnostics")
-            .then(response => response.json())
-            .then(diagnostics => {
-              const now = new Date();
+      fetchData() {
+        fetch('https://localhost:44340/api/diagnostics')
+          .then((response) => response.json())
+          .then((diagnostics) => {
+            const now = new Date();
+            this.allocated.push({ x: now, y: diagnostics.allocated / 1000000 });
+            this.workingSet.push({ x: now, y: diagnostics.workingSet / 1000000 });
 
-              // Cập nhật dữ liệu biểu đồ
-              this.updateChartData(now, diagnostics);
+            this.memoryChart.data.datasets[5].label = `CPU (${Math.round(
+              diagnostics.cpu
+            )}%)`;
+            this.memoryChart.data.datasets[6].label = `RPS (${Math.round(
+              diagnostics.rps / 1000
+            )}K)`;
 
-              // Xóa dữ liệu cũ nếu vượt quá maxEntries
-              this.trimOldData();
+            if (this.previousGen2 < diagnostics.gen2) {
+              this.generation2.push({ x: now, y: 1 });
+              this.previousGen2 = diagnostics.gen2;
+              this.previousGen1 = diagnostics.gen1;
+              this.previousGen0 = diagnostics.gen0;
+            } else if (this.previousGen1 < diagnostics.gen1) {
+              this.generation1.push({ x: now, y: 1 });
+              this.previousGen2 = diagnostics.gen2;
+              this.previousGen1 = diagnostics.gen1;
+              this.previousGen0 = diagnostics.gen0;
+            } else if (this.previousGen0 < diagnostics.gen0) {
+              this.generation0.push({ x: now, y: 1 });
+              this.previousGen2 = diagnostics.gen2;
+              this.previousGen1 = diagnostics.gen1;
+              this.previousGen0 = diagnostics.gen0;
+            }
 
-              // Cập nhật biểu đồ
-              this.memoryChart.update();
-            });
-        }, this.interval);
-      },
-      updateChartData(now, diagnostics) {
-        // Cập nhật dữ liệu các dataset ở đây
-      },
-      trimOldData() {
-        // Xóa dữ liệu cũ nếu vượt quá maxEntries ở đây
-      },
+            if (this.allocated.length > this.maxEntries) {
+              const firstDate = this.allocated[0].x;
+
+              this.allocated.shift();
+              this.workingSet.shift();
+
+              while (this.generation0.length > 0 && this.generation0[0].x < firstDate)
+                this.generation0.shift();
+              while (this.generation1.length > 0 && this.generation1[0].x < firstDate)
+                this.generation1.shift();
+              while (this.generation2.length > 0 && this.generation2[0].x < firstDate)
+                this.generation2.shift();
+            }
+
+            this.memoryChart.data.datasets[0].data = this.allocated;
+          this.memoryChart.data.datasets[1].data = this.workingSet;
+          this.memoryChart.data.datasets[2].data = this.generation0;
+          this.memoryChart.data.datasets[3].data = this.generation1;
+          this.memoryChart.data.datasets[4].data = this.generation2;
+
+            this.memoryChart.update();
+          });
+    },
+     
+     
     }
   }
 </script>
